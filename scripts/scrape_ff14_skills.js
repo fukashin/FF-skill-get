@@ -54,68 +54,58 @@ const JOB_MAPPINGS = {
 /**
  * スキル種類を判定する
  */
-function determineSkillType(skillElement, skillName) {
-  // アイコンやクラス名から判定
-  const iconSrc = skillElement.querySelector('img')?.src || '';
-  const skillText = skillElement.textContent.toLowerCase();
+function determineSkillType(skillData) {
+  const classification = skillData.classification || '';
   
-  // ウェポンスキル
-  if (iconSrc.includes('weaponskill') || skillText.includes('weapon')) {
+  // 分類から直接判定
+  if (classification.includes('ウェポンスキル')) {
     return 'weaponskill';
   }
   
-  // 魔法
-  if (iconSrc.includes('spell') || skillText.includes('spell') || skillText.includes('magic')) {
+  if (classification.includes('魔法')) {
     return 'spell';
   }
   
-  // アビリティ
-  if (iconSrc.includes('ability') || skillText.includes('ability')) {
+  if (classification.includes('アビリティ')) {
     return 'ability';
   }
   
-  // 特性
-  if (iconSrc.includes('trait') || skillText.includes('trait')) {
+  if (classification.includes('特性')) {
     return 'trait';
   }
   
   // リミットブレイク
-  if (skillName.includes('リミット') || skillName.includes('limit')) {
+  if (skillData.name.includes('リミット') || skillData.name.includes('limit')) {
     return 'limit_break';
   }
   
-  // デフォルト
+  // デフォルト（分類がない場合はアビリティとする）
   return 'ability';
 }
 
 /**
  * クールタイムとキャスト時間を解析
  */
-function parseSkillTiming(timingText) {
+function parseSkillTiming(castTimeText, recastTimeText) {
   const result = {
-    cooldown: 0,      // クールタイム（0.01秒単位）
     cast_time: 0,     // キャスト時間（0.01秒単位）
     recast_time: 0    // リキャスト時間（0.01秒単位）
   };
   
-  if (!timingText) return result;
-  
-  // クールタイム抽出（例：「再使用時間：60秒」）
-  const cooldownMatch = timingText.match(/再使用時間[：:]\s*(\d+(?:\.\d+)?)\s*秒/);
-  if (cooldownMatch) {
-    result.cooldown = Math.round(parseFloat(cooldownMatch[1]) * 100);
+  // キャスト時間の解析
+  if (castTimeText && castTimeText !== 'Instant') {
+    const castMatch = castTimeText.match(/(\d+(?:\.\d+)?)\s*秒/);
+    if (castMatch) {
+      result.cast_time = Math.round(parseFloat(castMatch[1]) * 100);
+    }
   }
   
-  // キャスト時間抽出（例：「詠唱時間：2.5秒」）
-  const castMatch = timingText.match(/詠唱時間[：:]\s*(\d+(?:\.\d+)?)\s*秒/);
-  if (castMatch) {
-    result.cast_time = Math.round(parseFloat(castMatch[1]) * 100);
-  }
-  
-  // リキャスト時間抽出（例：「リキャスト：2.5秒」）
-  const recastMatch = timingText.match(/リキャスト[：:]\s*(\d+(?:\.\d+)?)\s*秒/);
-  if (recastMatch) {
-    result.recast_time = Math.round(parseFloat(recastMatch[1]) * 100);
+  // リキャスト時間の解析
+  if (recastTimeText) {
+    const recastMatch = recastTimeText.match(/(\d+(?:\.\d+)?)\s*秒/);
+    if (recastMatch) {
+      result.recast_time = Math.round(parseFloat(recastMatch[1]) * 100);
+    }
   }
   
   return result;
@@ -162,51 +152,63 @@ async function scrapeFF14Skills(jobName) {
     
     // スキル情報を抽出
     const skills = await page.evaluate((jobRole, jobName) => {
-      const skillElements = document.querySelectorAll('.job_skill_detail, .skill_detail, .job__skill_detail, [class*="skill"]');
+      // PvEアクションのテーブル行を取得
+      const skillRows = document.querySelectorAll('tr[id*="pve_action"]');
       const extractedSkills = [];
       
-      skillElements.forEach((skillEl, index) => {
+      skillRows.forEach((row, index) => {
         try {
           // スキル名を取得
-          const nameEl = skillEl.querySelector('.skill_name, .job__skill_name, h3, h4, .title') || 
-                        skillEl.querySelector('[class*="name"]') ||
-                        skillEl.querySelector('strong');
-          
-          const skillName = nameEl ? nameEl.textContent.trim() : `Unknown Skill ${index + 1}`;
+          const nameEl = row.querySelector('td.skill strong');
+          const skillName = nameEl ? nameEl.textContent.trim() : '';
           
           if (!skillName || skillName === '') return;
           
-          // スキル説明を取得
-          const descEl = skillEl.querySelector('.skill_desc, .job__skill_desc, .description, p') ||
-                        skillEl.querySelector('[class*="desc"]');
-          const description = descEl ? descEl.textContent.trim() : '';
-          
           // レベル情報を取得
-          const levelEl = skillEl.querySelector('.skill_level, .job__skill_level, [class*="level"]');
-          const levelText = levelEl ? levelEl.textContent : '';
-          const levelMatch = levelText.match(/(\d+)/);
+          const levelEl = row.querySelector('td.jobclass p');
+          const levelText = levelEl ? levelEl.textContent.trim() : '';
+          const levelMatch = levelText.match(/Lv(\d+)/);
           const level = levelMatch ? parseInt(levelMatch[1]) : 1;
           
-          // タイミング情報を取得
-          const timingEl = skillEl.querySelector('.skill_timing, .job__skill_timing, [class*="timing"]');
-          const timingText = timingEl ? timingEl.textContent : '';
+          // スキルタイプを取得
+          const classificationEl = row.querySelector('td.classification');
+          const classification = classificationEl ? classificationEl.textContent.trim().replace(/\s+/g, '') : '';
+          
+          // キャスト時間を取得
+          const castEl = row.querySelector('td.cast');
+          const castTime = castEl ? castEl.textContent.trim() : '';
+          
+          // リキャスト時間を取得
+          const recastEl = row.querySelector('td.recast');
+          const recastTime = recastEl ? recastEl.textContent.trim() : '';
+          
+          // コスト情報を取得
+          const costEl = row.querySelector('td.cost');
+          const cost = costEl ? costEl.textContent.trim() : '';
+          
+          // スキル説明を取得（最後のtd要素）
+          const allTds = row.querySelectorAll('td');
+          const descriptionEl = allTds[allTds.length - 1];
+          const description = descriptionEl ? descriptionEl.textContent.trim() : '';
           
           // アイコンURL取得
-          const iconEl = skillEl.querySelector('img');
+          const iconEl = row.querySelector('td.skill img');
           const iconUrl = iconEl ? iconEl.src : '';
           
           extractedSkills.push({
             name: skillName,
             description: description,
             level: level,
-            timing_text: timingText,
+            classification: classification,
+            cast_time_text: castTime,
+            recast_time_text: recastTime,
+            cost: cost,
             icon_url: iconUrl,
             job_role: jobRole,
-            job_name: jobName,
-            raw_html: skillEl.innerHTML.substring(0, 500) // デバッグ用
+            job_name: jobName
           });
         } catch (error) {
-          console.error('Error processing skill element:', error);
+          console.error('Error processing skill row:', error);
         }
       });
       
@@ -219,8 +221,8 @@ async function scrapeFF14Skills(jobName) {
     
     // スキルデータを整形
     const processedSkills = skills.map((skill, index) => {
-      const timing = parseSkillTiming(skill.timing_text);
-      const skillType = determineSkillType({ textContent: skill.description + skill.timing_text }, skill.name);
+      const timing = parseSkillTiming(skill.cast_time_text, skill.recast_time_text);
+      const skillType = determineSkillType(skill);
       
       return {
         id: `${jobName}_skill_${index + 1}`,
@@ -229,9 +231,10 @@ async function scrapeFF14Skills(jobName) {
         level: skill.level,
         job_role: skill.job_role,
         skill_type: skillType,
-        cooldown: timing.cooldown,
+        classification: skill.classification,
         cast_time: timing.cast_time,
         recast_time: timing.recast_time,
+        cost: skill.cost,
         icon_url: skill.icon_url,
         source_url: url,
         scraped_at: new Date().toISOString()
