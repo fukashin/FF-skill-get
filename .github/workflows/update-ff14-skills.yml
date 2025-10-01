@@ -1,0 +1,91 @@
+name: Update FF14 Skills Data
+
+# 実行タイミング設定
+on:
+  # 手動実行ボタン（GitHubの Actions タブから実行可能）
+  workflow_dispatch:
+    inputs:
+      job_name:
+        description: 'FF14 Job name (e.g., paladin, warrior, dark_knight)'
+        required: true
+        default: 'paladin'
+        type: choice
+        options:
+          - paladin
+          - warrior  
+          - dark_knight
+          - white_mage
+          - black_mage
+          
+  # 定期実行（毎週日曜日 0時に実行）
+  schedule:
+    - cron: '0 0 * * 0'
+
+# 実行権限設定
+permissions:
+  contents: write  # ファイル書き込み権限
+  actions: read    # Actions読み取り権限
+
+jobs:
+  update-skills:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. リポジトリをチェックアウト
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    # 2. Node.js環境をセットアップ  
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: scripts/package.json
+        
+    # 3. 依存関係をインストール
+    - name: Install dependencies
+      run: |
+        cd scripts
+        npm install
+        
+    # 4. Chrome WebDriverをインストール（Puppeteer用）
+    - name: Install Chrome
+      uses: browser-actions/setup-chrome@latest
+      
+    # 5. スクレイピングスクリプトを実行
+    - name: Run FF14 skills scraper
+      run: |
+        cd scripts
+        node scrape_ff14_skills.js --job ${{ github.event.inputs.job_name || 'paladin' }} --verbose --output ../data
+      env:
+        JOB_NAME: ${{ github.event.inputs.job_name || 'paladin' }}
+        
+    # 6. 生成されたJSONファイルをコミット
+    - name: Commit updated skills data
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data/*.json
+        
+        # 変更があった場合のみコミット
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "🔄 Update FF14 ${{ github.event.inputs.job_name || 'paladin' }} skills data - $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
+        fi
+        
+    # 7. 結果の通知（オプション）
+    - name: Create summary
+      run: |
+        echo "## 📊 FF14 Skills Update Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Job**: ${{ github.event.inputs.job_name || 'paladin' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Date**: $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "data/${{ github.event.inputs.job_name || 'paladin' }}_skills.json" ]; then
+          SKILL_COUNT=$(cat "data/${{ github.event.inputs.job_name || 'paladin' }}_skills.json" | jq '.skills | length')
+          echo "- **Skills Count**: $SKILL_COUNT" >> $GITHUB_STEP_SUMMARY
+        fi

@@ -1,0 +1,123 @@
+name: Update All FF14 Skills Data
+
+# 全ジョブのスキルデータを一括更新するワークフロー
+on:
+  # 手動実行ボタン（GitHubの Actions タブから実行可能）
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: 'Jobs to scrape (comma-separated, leave empty for all)'
+        required: false
+        default: ''
+        type: string
+      delay:
+        description: 'Delay between requests (milliseconds)'
+        required: false
+        default: '3000'
+        type: string
+        
+  # 定期実行（毎月1日 0時に実行）
+  schedule:
+    - cron: '0 0 1 * *'
+
+# 実行権限設定
+permissions:
+  contents: write  # ファイル書き込み権限
+  actions: read    # Actions読み取り権限
+
+jobs:
+  update-all-skills:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. リポジトリをチェックアウト
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    # 2. Node.js環境をセットアップ  
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: scripts/package.json
+        
+    # 3. 依存関係をインストール
+    - name: Install dependencies
+      run: |
+        cd scripts
+        npm install
+        
+    # 4. Chrome WebDriverをインストール（Puppeteer用）
+    - name: Install Chrome
+      uses: browser-actions/setup-chrome@latest
+      
+    # 5. 全ジョブのスクレイピングスクリプトを実行
+    - name: Run FF14 all jobs scraper
+      run: |
+        cd scripts
+        if [ -n "${{ github.event.inputs.jobs }}" ]; then
+          node scrape_all_jobs.js --jobs "${{ github.event.inputs.jobs }}" --delay ${{ github.event.inputs.delay || '3000' }} --verbose --output ../data
+        else
+          node scrape_all_jobs.js --delay ${{ github.event.inputs.delay || '3000' }} --verbose --output ../data
+        fi
+      env:
+        JOBS_INPUT: ${{ github.event.inputs.jobs }}
+        DELAY_INPUT: ${{ github.event.inputs.delay || '3000' }}
+        
+    # 6. 生成されたJSONファイルをコミット
+    - name: Commit updated skills data
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data/*.json
+        
+        # 変更があった場合のみコミット
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          if [ -n "${{ github.event.inputs.jobs }}" ]; then
+            git commit -m "🔄 Update FF14 skills data for: ${{ github.event.inputs.jobs }} - $(date +'%Y-%m-%d %H:%M:%S')"
+          else
+            git commit -m "🔄 Update all FF14 skills data - $(date +'%Y-%m-%d %H:%M:%S')"
+          fi
+          git push
+        fi
+        
+    # 7. 結果の通知とサマリー作成
+    - name: Create summary
+      run: |
+        echo "## 📊 FF14 All Skills Update Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Date**: $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+        echo "- **Delay**: ${{ github.event.inputs.delay || '3000' }}ms" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -n "${{ github.event.inputs.jobs }}" ]; then
+          echo "- **Target Jobs**: ${{ github.event.inputs.jobs }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Target Jobs**: All available jobs" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "- **Status**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # 統合ファイルがあれば統計を表示
+        if [ -f "data/all_ff14_skills.json" ]; then
+          echo "### 📈 Statistics" >> $GITHUB_STEP_SUMMARY
+          TOTAL_JOBS=$(cat "data/all_ff14_skills.json" | jq '.metadata.total_jobs')
+          TOTAL_SKILLS=$(cat "data/all_ff14_skills.json" | jq '.metadata.total_skills')
+          echo "- **Total Jobs Processed**: $TOTAL_JOBS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Skills Scraped**: $TOTAL_SKILLS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📋 Jobs Summary" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cat "data/all_ff14_skills.json" | jq -r '.metadata.jobs[] | "\(.job_display_name) (\(.job_name)): \(.skills_count) skills"' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # 個別ファイルの一覧も表示
+        echo "### 📁 Generated Files" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        ls -la data/*.json | awk '{print $9, $5"B"}' >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

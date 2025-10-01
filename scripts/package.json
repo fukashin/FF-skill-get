@@ -1,0 +1,36 @@
+{
+  "name": "ff14-skills-scraper",
+  "version": "1.0.0",
+  "description": "FF14公式サイトからスキルデータを取得するスクレイパー",
+  "main": "scrape_ff14_skills.js",
+  "scripts": {
+    "scrape": "node scrape_ff14_skills.js",
+    "scrape:paladin": "node scrape_ff14_skills.js --job paladin --verbose",
+    "scrape:warrior": "node scrape_ff14_skills.js --job warrior --verbose",
+    "scrape:all": "node scrape_all_jobs.js --verbose",
+    "test": "node test_scraper.js"
+  },
+  "keywords": [
+    "ff14",
+    "finalfantasy",
+    "scraper",
+    "skills",
+    "gaming"
+  ],
+  "author": "FF14 Timeline Manager",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^21.5.0",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  }
+}
